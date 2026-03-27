@@ -28,7 +28,6 @@ params:
     Content: >
       A technical blog series on building hierarchical reinforcement learning
       for infrastructure autoscaling — from architecture through production rollout.
-      Written by a platform architect at a major fintech.
 
   socialIcons:
     - name: linkedin
