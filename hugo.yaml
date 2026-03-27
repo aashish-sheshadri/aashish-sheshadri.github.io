@@ -1,0 +1,80 @@
+baseURL: https://aashish-sheshadri.github.io/
+locale: en-us
+title: Aashish Sheshadri
+theme: PaperMod
+
+paginate: 10
+
+params:
+  env: production
+  title: Aashish Sheshadri
+  description: "Reinforcement learning for infrastructure. Hierarchical RL, autoscaling, production ML systems."
+  author: Aashish Sheshadri
+
+  defaultTheme: auto
+  ShowReadingTime: true
+  ShowShareButtons: true
+  ShowPostNavLinks: true
+  ShowBreadCrumbs: true
+  ShowCodeCopyButtons: true
+  ShowWordCount: false
+  ShowRssButtonInSectionTermList: true
+  UseHugoToc: true
+  disableSpecial1stPost: false
+  disableScrollToTop: false
+
+  homeInfoParams:
+    Title: "RL in Production"
+    Content: >
+      A technical blog series on building hierarchical reinforcement learning
+      for infrastructure autoscaling — from architecture through production rollout.
+      Written by a platform architect at a major fintech.
+
+  socialIcons:
+    - name: linkedin
+      url: "https://www.linkedin.com/in/aashish-sheshadri/"
+    - name: github
+      url: "https://github.com/aashish-sheshadri"
+
+  assets:
+    favicon: "/favicon.ico"
+
+  cover:
+    linkFullImages: true
+
+  fuseOpts:
+    isCaseSensitive: false
+    shouldSort: true
+    location: 0
+    distance: 1000
+    threshold: 0.4
+    minMatchCharLength: 0
+    keys: ["title", "permalink", "summary", "content"]
+
+outputs:
+  home:
+    - HTML
+    - RSS
+    - JSON
+
+markup:
+  highlight:
+    codeFences: true
+    guessSyntax: true
+    lineNos: false
+    style: monokai
+
+menu:
+  main:
+    - identifier: series
+      name: HiRL-Scale Series
+      url: /series/hirl-scale/
+      weight: 10
+    - identifier: about
+      name: About
+      url: /about/
+      weight: 20
+    - identifier: search
+      name: Search
+      url: /search/
+      weight: 30
