@@ -8,7 +8,7 @@ paginate: 10
 params:
   env: production
   title: Aashish Sheshadri
-  description: "Reinforcement learning for infrastructure. Hierarchical RL, autoscaling, production ML systems."
+  description: "Writing about ML systems, infrastructure, and what happens when you try to make them work at scale."
   author: Aashish Sheshadri
 
   defaultTheme: auto
@@ -24,10 +24,10 @@ params:
   disableScrollToTop: false
 
   homeInfoParams:
-    Title: "RL in Production"
+    Title: "Hi, I'm Aashish"
     Content: >
-      A technical blog series on building hierarchical reinforcement learning
-      for infrastructure autoscaling — from architecture through production rollout.
+      Platform architect. I write about ML systems, reinforcement learning,
+      infrastructure, and the engineering that makes them work at scale.
 
   socialIcons:
     - name: linkedin
@@ -66,14 +66,18 @@ markup:
 menu:
   main:
     - identifier: series
-      name: HiRL-Scale Series
-      url: /series/hirl-scale/
+      name: Series
+      url: /series/
       weight: 10
+    - identifier: tags
+      name: Tags
+      url: /tags/
+      weight: 20
     - identifier: about
       name: About
       url: /about/
-      weight: 20
+      weight: 30
     - identifier: search
       name: Search
       url: /search/
-      weight: 30
+      weight: 40

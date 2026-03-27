@@ -7,9 +7,7 @@ summary: "About Aashish Sheshadri"
 
 I'm a platform architect working on infrastructure ML — autoscaling, capacity planning, and production ML systems across ~1,500 services.
 
-This blog is a technical series on **HiRL-Scale**, a hierarchical reinforcement learning autoscaler I designed for large-scale Kubernetes infrastructure. The series covers the full journey: problem decomposition, architecture decisions, reward function design, training curriculum, platform engineering, and the honest lessons learned.
-
-I write about what actually works (and what doesn't) when you try to apply RL to real infrastructure at scale.
+I write about what actually works (and what doesn't) when you build ML systems for real infrastructure at scale. Topics include reinforcement learning, ML platform design, and the engineering that sits between a model and production.
 
 Previously: ML platform architecture, NLP for information security, and cryptography research with Doug Crockford.
 
