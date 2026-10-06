@@ -1,0 +1,129 @@
+---
+title: "What the Evals Missed"
+slug: "what-the-evals-missed"
+aliases:
+  - /posts/07-what-the-evals-missed/
+date: 2026-08-20
+draft: false
+series: ["HiRL-Scale"]
+tags: ["reinforcement-learning", "evaluation", "production-ml", "kubernetes"]
+description: "Stage gates, calibration by slice, and the reward-hacking detector I built three weeks too late. How I knew the system was working, and every place that knowledge turned out to be wrong."
+ShowToc: true
+TocOpen: false
+weight: 7
+---
+
+The previous post was about writing a reward function and watching a policy exploit it. This one is about the harder question underneath: how did I know any of it was working?
+
+Not "did the loss go down." Loss went down the entire time, including during the weeks the policy was quietly learning to game me. I mean the actual question — is this thing doing what I meant, and how would I find out if it were not.
+
+That question turned out to have a worse answer than I expected, and most of what I now believe about it I learned from an eval that passed when it should have failed.
+
+---
+
+## What the Soldiers Actually Do
+
+I promised the safety design early in the series and never delivered it properly. It belongs here, because the Soldiers are the thing being evaluated.
+
+The Commander emits a capacity share per domain. A Soldier turns that share into replica counts across 150 to 500 applications, every ten seconds. Two mechanisms make that tractable.
+
+The first is that it does not reason about every app. An attention layer runs across the whole domain to keep breadth, and a top-K selection — K of twenty — picks the applications actually at risk. Those get individual replica deltas. Everything else is scaled proportionally within its group by a rule-based distributor. That collapses an action space that would otherwise run from three hundred to a thousand dimensions down to roughly fifty, which is at the edge of the range where PPO's diagonal Gaussian policy still behaves.
+
+I should say plainly that K equals twenty is a heuristic. I tested a range and twenty was stable. I do not have a principled argument for why it beats fifteen or thirty, and if the domain composition shifts I do not know that it still holds.
+
+The second mechanism is that the Soldier cannot spend far outside its budget even if it wants to. A projection sits after the actor output and pulls any allocation back toward the Commander's share, with a hard cap behind it at ten percent over — a band left open deliberately, so a Soldier watching an SLO break in real time can push emergency replicas without waiting for the next Commander tick. The group-level allocation is a softmax, so it sits on the simplex by construction and there is no rule to violate. The app-level deltas are clipped to their group's share, which is cruder: clipping has no gradient on the dimensions it truncates, so a Soldier that overshoots is stopped rather than taught. That distinction still matters. A constraint the policy could violate and is penalized for is a thing the policy will eventually find a way around. A constraint built into the shape of the action space is not one the policy gets to argue with — though I should be honest that the shape has a door in it, and I am the one who put it there.
+
+Sitting alongside it is the coupling reward, which scores how well the Soldier's actual resource distribution matches the demand-weighted split of the Commander's budget. The previous post has the full account of getting that term wrong twice. What matters here is the part that belongs to this one: no gate was watching either version. The reward was — the budget-utilization term prices exactly the over-spending the second version let through — but it is out-ranked by the alignment term it was supposed to check, so the signal was there and inaudible. The first only showed up when I went looking at scale. No gate in the curriculum was watching either.
+
+---
+
+## The Gates
+
+Training runs in six stages, and each transition has a numeric threshold that has to be met before the next stage begins, most of them on a held-out set. Not a judgment call — a number, set in advance.
+
+The forecaster advances when its fifteen-minute-horizon error is under ten percent on held-out weeks. A Soldier advances to Commander pre-training at above ninety-seven percent domain SLO adherence, measured as the fraction of ticks in compliance, on a held-out single-domain scenario set. Joint training advances to shadow mode when no domain degrades past 1.2× its SLO for more than thirty seconds across the adversarial set, with a pass rate above ninety percent.
+
+The scenarios themselves ladder in difficulty, ending on cases built to be nasty rather than representative: flash traffic on the lowest-priority domain while a P0 domain is already near its threshold, simultaneous spikes across the P0 domains, cascading latency from a simulated dependency outage. That last set exists because the failure that motivated this whole project was a correlated one, and a curriculum that only trains on independent events teaches a policy that has never seen the thing you are afraid of.
+
+Setting thresholds in advance is the part I would keep if I could keep only one practice. It is not that the numbers were right — several of them were not. It is that having written them down before the run, I could not later decide that whatever the policy did was fine.
+
+---
+
+## The Eval That Passed and Should Not Have
+
+Here is the one that changed how I think.
+
+The stage gate the forecaster had to clear was an error threshold. The number I actually trusted was quantile calibration: does the p80 forecast get exceeded about twenty percent of the time? I checked that across domains and it looked good. Aggregate calibration sat close to target, the gate passed on error, and the curriculum moved on.
+
+It was wrong in a way the aggregate could not show. The model was systematically overconfident during morning ramp-up — intervals too narrow, exactly in the window where traffic is most volatile. Averaged across the day, being over-confident in the morning and under-confident overnight produces a calibration number that looks correct. The two errors cancel, and the metric reports health.
+
+![p80 exceedance by time-of-day slice: two opposite errors averaging to a healthy number](./diagrams/svg/07_calibration_cancellation.svg)
+
+So the Commander was receiving its least honest uncertainty estimates precisely when uncertainty mattered most, and every gate I had said the forecaster was ready.
+
+I found it in shadow mode, several stages later. The fix was straightforward once I knew — validate calibration stratified by slice rather than in aggregate, recalibrate, and re-run the curriculum from Stage 3. The Soldiers never see the forecast, so their pre-training survived untouched. The cost was not the fix either; recalibration wraps the model rather than replacing it, and it is cheap. The cost was that two stages of Commander training had run against a forecaster whose uncertainty was miscalibrated in a specific, structured way, and I had no way to tell which of its learned behaviors were adaptations to a real signal and which were adaptations to that flaw.
+
+The lesson I took is narrower than "test more." It is that an aggregate metric over a heterogeneous population can be right in a way that guarantees it is lying. If the population has structure — time of day, domain, traffic regime — the metric has to be stratified along that structure or it will average away the thing you are trying to see. I now assume any headline number is concealing at least one such cancellation, and the useful question is which axis to slice on.
+
+---
+
+## The Detector I Built Three Weeks Late
+
+The reward-hacking cases in the previous post were all found by me, reading behavior and noticing something was off. That is a bad detection mechanism and I only replaced it after it had already cost me.
+
+What replaced it: once a week, correlate the reward signal against every available cluster metric — including, and especially, metrics that are not in the reward function. Any metric more strongly correlated with reward than with the actual SLO outcomes the reward is supposed to be a proxy for is a candidate for being gamed. It is a cheap query and it finds the shape of the problem rather than the instance.
+
+Every hack I had found by hand would have surfaced in the first week of that analysis. I lost roughly three weeks of training to behaviors a query I had not written yet would have caught immediately. Building the detector before the first incident rather than after is the single highest-return thing I did on this project, and I did it in the wrong order.
+
+There is a general version of this I now believe: if your reward is a proxy — and it always is — then the monitoring you need is not on the reward. It is on the gap between the reward and the thing the reward stands for. Watching the proxy tells you the optimizer is working. Watching the gap tells you what it is working on.
+
+---
+
+## Where the Guardrail Was Not What I Said It Was
+
+I wrote a design document whose numbers read as though the safety envelope reacts faster than the policy it governs. For a P0 domain: alert at 1.2× SLO sustained fifteen seconds, freeze at 1.5×, full revert at 2×, no human approval required at any rung. Lower tiers get longer windows still. Fifteen seconds against a sixty-second Commander tick reads as a four-fold margin.
+
+It is not. The guardrail reads the same telemetry the agent does, and a domain-level p99 is sixty to a hundred and twenty seconds stale by the time anything can act on it. The real end-to-end reaction is the sustain window plus that lag — closer to two minutes, which is slower than the policy it exists to catch.
+
+![The guardrail's end-to-end reaction against the Commander tick it is meant to catch](./diagrams/svg/07_guardrail_lag.svg)
+
+I did not discover this by testing the guardrail. I discovered it by writing down the staleness of every observation for a different reason entirely, and noticing that the safety layer was reading from the same table.
+
+Closing it means a separate, thinner, higher-frequency path for the rollback signals alone — direct proxy stats on the P0 gateways rather than the aggregated pipeline. I have not built it. Until I do, the cage is looser than its thresholds make it sound, and I would rather say that than let the numbers in the design doc stand as the claim.
+
+---
+
+## What the Numbers Say
+
+These are simulation measurements taken across the Stage 4 adversarial set, for the reason given in the previous post. Against targets I set in the architecture document before any of it ran:
+
+| Target | Set at | Measured |
+|---|---|---|
+| SLO breach reduction | 70% | ~60% |
+| Node provisioner churn reduction | 60% | ~45% |
+| Cascade event reduction | 90% | ~70% |
+| Over-provisioning, blended | <25% P2/P3, <30% P0/P1 | ~24% blended |
+
+Three of four fall short. Over-provisioning is the one that met its target, and I am less pleased about that than the row suggests: a single blended figure cannot tell me whether P0 and P1 are sitting where I wanted them or running leaner than I intended, and leaner is the wrong direction to miss in.
+
+I am not going to present those as wins. The cascade number is the one I care about most, because correlated failures were the entire reason this project existed, and a seventy percent reduction would move them from roughly weekly to roughly monthly. That would be a real change in what the on-call rotation looks like. It is also not ninety percent, and the gap between what I predicted and what I got is the most useful data in the table.
+
+---
+
+## What I Would Tell Myself at the Start
+
+Three things, in order of how much they cost me.
+
+**Build the gap detector first.** Before the first training run, not after the first incident. The reward is a proxy; instrument the distance between the proxy and the thing it stands for, and do it as a standing query rather than as an investigation you launch when something already looks wrong.
+
+**Stratify every metric along the structure of the population it summarizes.** Aggregate calibration passed a gate it should have failed, and it did so by averaging two opposite errors into an apparently healthy number. Any headline figure over a heterogeneous population is hiding a cancellation somewhere; the work is deciding which axis it is hiding along.
+
+**Write the thresholds down before the run.** Not because you will get them right — I got most of mine wrong by ten to twenty points — but because it is the only thing that stops you from grading your own homework afterward. Every honest number in the table above exists because I could not quietly move the target once I saw the result.
+
+The through-line, if there is one: every mechanism in this system that actually held was one that did not depend on me noticing something. The simplex projection holds because the constraint is the shape of the space rather than a rule with a penalty attached. The stage gates hold because the number was fixed before the run. The detector works because it is a scheduled query rather than an act of attention.
+
+Everything that depended on me being alert — reading behavior, spotting a bad calibration, remembering that the guardrail and the agent share a telemetry path — is exactly where this system went wrong, and it went wrong in proportion to how confident I was that I was paying attention.
+
+---
+
+*Seven posts, March to August 2026. Two things in the design are still unbuilt: a rollback path that does not read the agent's telemetry, and a per-tier over-provisioning number.*
